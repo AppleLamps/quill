@@ -58,26 +58,38 @@ internal static class Program
             return 64;
         }
 
-        switch (command)
+        try
         {
-            case "run":
-                return RunDaemon(args);
-            case "doctor":
+            switch (command)
             {
-                var checks = DoctorReport.Run(Config.ResolveRoot(OptionValue(args, "--out")));
-                DoctorReport.Print(checks);
-                return DoctorReport.AllOk(checks) ? 0 : 1;
+                case "run":
+                    return RunDaemon(args);
+                case "doctor":
+                {
+                    var checks = DoctorReport.Run(Config.ResolveRoot(OptionValue(args, "--out")));
+                    DoctorReport.Print(checks);
+                    return DoctorReport.AllOk(checks) ? 0 : 1;
+                }
+                case "transcribe":
+                    return Transcribe(args);
+                case "install":
+                    return Install.Run(
+                        launchAtLogin: args.Contains("--launch-at-login"),
+                        uninstall: args.Contains("--uninstall"));
+                default:
+                    throw new UnreachableException(command);
             }
-            case "transcribe":
-                return Transcribe(args);
-            case "install":
-                return Install.Run(
-                    launchAtLogin: args.Contains("--launch-at-login"),
-                    uninstall: args.Contains("--uninstall"));
-            default:
-                throw new UnreachableException(command);
+        }
+        catch (UsageException e)
+        {
+            Console.Error.WriteLine($"{e.Message}\n");
+            Console.Error.WriteLine(Usage);
+            return 64;
         }
     }
+
+    /// A malformed command line, reported as usage rather than a crash.
+    private sealed class UsageException(string message) : Exception(message);
 
     /// Box-drawing and · separators in the output assume UTF-8. Setting the
     /// encoding throws when quill runs with no console attached at all, which
@@ -178,12 +190,18 @@ internal static class Program
         }
     }
 
-    /// Value of `--name <value>`, or null when absent.
+    /// Value of `--name <value>`, or null when the flag is absent.
+    ///
+    /// A flag with no value is an error, not a fallback: `quill run --out`
+    /// silently recording to the config root instead of the directory the user
+    /// was in the middle of typing is the kind of thing you notice a week
+    /// later, when you go looking for a meeting.
     private static string? OptionValue(string[] args, string name)
     {
         var index = Array.IndexOf(args, name);
-        if (index < 0 || index + 1 >= args.Length) return null;
-        var value = args[index + 1];
-        return value.StartsWith('-') ? null : value;
+        if (index < 0) return null;
+        if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
+            throw new UsageException($"{name} needs a value");
+        return args[index + 1];
     }
 }

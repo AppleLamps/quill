@@ -75,7 +75,7 @@ internal sealed class TranscriptionCoordinator
     {
         try
         {
-            await TranscribeAsync(dir).WaitAsync(cancellationToken).ConfigureAwait(false);
+            await TranscribeAsync(dir, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -111,7 +111,7 @@ internal sealed class TranscriptionCoordinator
             Publish(new Status.Transcribing(Path.GetFileName(dir), queued));
             try
             {
-                await TranscribeAsync(dir).ConfigureAwait(false);
+                await TranscribeAsync(dir, CancellationToken.None).ConfigureAwait(false);
                 Notify.User("quill — transcript ready", Path.GetFileName(dir));
                 RunHook(dir);
             }
@@ -133,10 +133,10 @@ internal sealed class TranscriptionCoordinator
         DrainIfIdle();
     }
 
-    private async Task TranscribeAsync(string dir)
+    private async Task TranscribeAsync(string dir, CancellationToken cancellationToken)
     {
         var meta = SessionMeta.Read(dir);
-        var engine = await PreparedEngineAsync().ConfigureAwait(false);
+        var engine = await PreparedEngineAsync(cancellationToken).ConfigureAwait(false);
 
         var merged = new List<TranscriptSegmentRecord>();
         foreach (var track in meta.Tracks)
@@ -150,11 +150,17 @@ internal sealed class TranscriptionCoordinator
             Log(dir, $"transcribing {track.File} ({engine.Name} {engine.Model})");
 
             // One bad track (empty, truncated) shouldn't cost us the other's
-            // transcript — log it and keep going.
+            // transcript — log it and keep going. Cancellation is not a bad
+            // track: it has to abandon the whole session, not skip one file.
             IReadOnlyList<TranscriptSegment> segments;
             try
             {
-                segments = await engine.TranscribeAsync(audio).ConfigureAwait(false);
+                segments = await engine.TranscribeAsync(audio, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception e)
             {
@@ -179,7 +185,7 @@ internal sealed class TranscriptionCoordinator
         Log(dir, $"done — {merged.Count} segments");
     }
 
-    private async Task<ITranscriptionEngine> PreparedEngineAsync()
+    private async Task<ITranscriptionEngine> PreparedEngineAsync(CancellationToken cancellationToken)
     {
         if (_engine is not null) return _engine;
         var configured = Config.TranscriptionEngine();
@@ -188,7 +194,7 @@ internal sealed class TranscriptionCoordinator
                 $"warning: unknown transcription engine \"{configured}\" — using whisper");
 
         var engine = new WhisperEngine(Config.TranscriptionModel());
-        await engine.PrepareAsync().ConfigureAwait(false);
+        await engine.PrepareAsync(cancellationToken).ConfigureAwait(false);
         _engine = engine;
         return engine;
     }

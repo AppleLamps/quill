@@ -6,7 +6,7 @@ namespace Quill.Audio;
 /// Shared lifecycle for one WASAPI capture client writing one track: resolve
 /// the endpoint, stream it into a `TrackWriter`, and shut down without losing
 /// the tail of the recording.
-internal abstract class CaptureTrack
+internal abstract class CaptureTrack : IDisposable
 {
     /// WASAPI drains asynchronously — StopRecording() returns immediately and
     /// the capture thread delivers what's left before raising RecordingStopped.
@@ -33,6 +33,10 @@ internal abstract class CaptureTrack
 
     public void Start(string path)
     {
+        // A track restarted on the same instance must wait for the *new*
+        // capture's drain, not observe the last one's already-signalled state.
+        _drained.Reset();
+
         using var enumerator = new MMDeviceEnumerator();
         var device = ResolveDevice(enumerator);
 
@@ -82,5 +86,14 @@ internal abstract class CaptureTrack
         _capture = null;
         _writer = null;
         _device = null;
+    }
+
+    /// Waiting on `_drained` with a timeout inflates it into a real kernel
+    /// event; a daemon that records all day shouldn't leave one per track for
+    /// the finalizer to collect.
+    public void Dispose()
+    {
+        Stop();
+        _drained.Dispose();
     }
 }

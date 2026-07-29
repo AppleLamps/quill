@@ -22,7 +22,14 @@ internal static class TrayIconFactory
         return lightTaskbar ? Color.FromArgb(255, 32, 32, 32) : Color.White;
     }
 
-    public static Icon Feather(bool recording, int size = 32)
+    /// The notification area asks for a small-icon-sized bitmap, which scales
+    /// with DPI. Never go below 32 even when Windows asks for 16: the shell
+    /// downscales a detailed glyph better than this path draws a cramped one.
+    private static int PreferredSize => Math.Max(32, SystemInformation.SmallIconSize.Width);
+
+    public static Icon Feather(bool recording) => Feather(recording, PreferredSize);
+
+    public static Icon Feather(bool recording, int size)
     {
         using var bitmap = new Bitmap(size, size);
         using (var g = Graphics.FromImage(bitmap))

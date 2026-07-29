@@ -70,6 +70,10 @@ internal sealed partial class WhisperEngine : ITranscriptionEngine
         // track's clock.
         while (true)
         {
+            // Fill() and the decode behind it are synchronous, so a cancel
+            // lands at the next chunk boundary rather than immediately.
+            cancellationToken.ThrowIfCancellationRequested();
+
             var filled = Fill(audio, window, carried);
             var last = filled < window.Length;
             // Cut the window at its quietest point rather than at an arbitrary
@@ -180,13 +184,39 @@ internal sealed partial class WhisperEngine : ITranscriptionEngine
     {
         var reader = new AudioFileReader(path);
         ISampleProvider provider = reader;
-        if (provider.WaveFormat.Channels == 2)
-            provider = new StereoToMonoSampleProvider(provider) { LeftVolume = 0.5f, RightVolume = 0.5f };
-        else if (provider.WaveFormat.Channels > 2)
-            provider = new MultiplexingSampleProvider([provider], 1);
+        if (provider.WaveFormat.Channels > 1) provider = new DownmixSampleProvider(provider);
         if (provider.WaveFormat.SampleRate != WhisperSampleRate)
             provider = new WdlResamplingSampleProvider(provider, WhisperSampleRate);
         return new Mono16kReader(reader, provider);
+    }
+
+    /// Average every channel into one. NAudio's multiplexer *selects* channels
+    /// rather than mixing them, which on a 5.1 track would throw away the
+    /// centre channel — where dialogue lives.
+    private sealed class DownmixSampleProvider(ISampleProvider source) : ISampleProvider
+    {
+        private readonly int _channels = source.WaveFormat.Channels;
+        private float[] _interleaved = [];
+
+        public WaveFormat WaveFormat { get; } =
+            WaveFormat.CreateIeeeFloatWaveFormat(source.WaveFormat.SampleRate, 1);
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            var wanted = count * _channels;
+            if (_interleaved.Length < wanted) _interleaved = new float[wanted];
+
+            var read = source.Read(_interleaved, 0, wanted);
+            var frames = read / _channels;
+            for (var frame = 0; frame < frames; frame++)
+            {
+                var sum = 0f;
+                for (var channel = 0; channel < _channels; channel++)
+                    sum += _interleaved[frame * _channels + channel];
+                buffer[offset + frame] = sum / _channels;
+            }
+            return frames;
+        }
     }
 
     /// A sample provider that owns the file handle behind it.

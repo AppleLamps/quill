@@ -9,7 +9,7 @@ namespace Quill;
 /// (mic = you, system = them) plus a meta.json written on clean stop. Tracks
 /// are separate on purpose — speech models do better on clean single-source
 /// audio, and two tracks give free two-party diarization.
-internal sealed class RecordingSession
+internal sealed class RecordingSession : IDisposable
 {
     public string Dir { get; }
     public DateTime StartedAt { get; } = DateTime.UtcNow;
@@ -75,6 +75,14 @@ internal sealed class RecordingSession
 
         var json = meta.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(Path.Combine(Dir, "meta.json"), json);
+    }
+
+    /// Release both capture tracks. Stop() is idempotent, so disposing after a
+    /// clean stop — or after a Start() that threw halfway — is safe either way.
+    public void Dispose()
+    {
+        StopTrack("mic", _mic.Dispose);
+        StopTrack("system audio", _system.Dispose);
     }
 
     private static void StopTrack(string label, Action stop)

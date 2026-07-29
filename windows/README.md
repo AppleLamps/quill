@@ -47,9 +47,10 @@ whisper.cpp is a native library. `quill doctor` tells you if it's missing.
    turns red and the tooltip runs an elapsed counter. Windows shows the
    microphone-in-use indicator; no consent prompt appears for loopback, since
    capturing your own playback needs no permission.
-3. **Click → Stop recording** when the meeting ends. Transcription starts
-   automatically (the menu shows progress); a notification fires when the
-   transcript is ready.
+3. **Click → Stop recording** when the meeting ends. The menu item is briefly
+   disabled while both tracks finish draining and `meta.json` is written, then
+   transcription starts automatically (the menu shows progress); a notification
+   fires when the transcript is ready.
 
 Each session lands in `%USERPROFILE%\Recordings\<yyyy.MM.dd-HHmm>\`:
 
@@ -69,7 +70,10 @@ speaker-identification model.
 WASAPI delivers nothing while a device is silent, so an idle track would
 otherwise compress minutes of quiet into zero bytes and drift out of sync.
 Gaps longer than 120 ms are padded with silence, which keeps file position an
-honest clock and both tracks aligned with each other.
+honest clock and both tracks aligned with each other. The padding also runs on
+a one-second timer rather than only when the next buffer lands, so a track that
+goes quiet for ten minutes is still ten minutes long on disk the whole time —
+kill quill mid-silence and you keep everything up to the last second.
 
 ## Transcription
 
@@ -134,7 +138,8 @@ quill install --uninstall
 - **NAudio** — WASAPI shared-mode capture (mic) and WASAPI loopback (system)
 - **Whisper.net + whisper.cpp** — on-device transcription
 - **Windows Forms NotifyIcon** — the whole UI (feather drawn at runtime, so it
-  scales to any DPI and follows the taskbar theme)
+  scales to any DPI and follows the taskbar theme; it redraws when you switch
+  light/dark or move to a different display, rather than waiting for a restart)
 
 ## Gotchas
 

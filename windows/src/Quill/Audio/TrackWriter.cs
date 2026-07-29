@@ -15,18 +15,30 @@ namespace Quill.Audio;
 /// * WASAPI hands us nothing while a device is silent (loopback on an idle
 ///   speaker can go quiet for minutes). Wall-clock gaps larger than
 ///   `GapTolerance` are filled with silence, so file position stays a
-///   faithful clock and the two tracks stay in sync with each other.
+///   faithful clock and the two tracks stay in sync with each other. A timer
+///   does the same padding while no buffers arrive at all, so a killed
+///   process loses nothing beyond the last second.
 internal sealed class TrackWriter : IDisposable
 {
     private static readonly TimeSpan GapTolerance = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan HeaderInterval = TimeSpan.FromSeconds(1);
 
+    /// KSDATAFORMAT_SUBTYPE_IEEE_FLOAT. WASAPI reports its mix format as
+    /// WAVE_FORMAT_EXTENSIBLE, and NAudio only unwraps it to a plain
+    /// IeeeFloat format for subtypes it recognizes — the subtype GUID is the
+    /// only reliable answer to "is this float?".
+    private static readonly Guid FloatSubFormat = new("00000003-0000-0010-8000-00aa00389b71");
+
     private readonly WaveFileWriter _writer;
-    private readonly WaveFormat _source;
     private readonly Stopwatch _clock = new();
     private readonly object _gate = new();
+    // Threading, not Forms: this has to tick on a pool thread, independent of
+    // whether a message loop exists or is busy.
+    private readonly System.Threading.Timer _keepalive;
+    private readonly bool _sourceIsFloat;
     private readonly int _sourceChannels;
     private readonly int _sampleRate;
+    private readonly int _bitsPerSample;
     private readonly int _bytesPerSample;
     private byte[] _pcm = [];
     private byte[] _silence = [];
@@ -35,11 +47,16 @@ internal sealed class TrackWriter : IDisposable
 
     public TrackWriter(string path, WaveFormat sourceFormat)
     {
-        _source = sourceFormat;
+        _sourceIsFloat = sourceFormat.Encoding == WaveFormatEncoding.IeeeFloat
+                         || (sourceFormat is WaveFormatExtensible extensible
+                             && extensible.SubFormat == FloatSubFormat);
         _sourceChannels = Math.Max(1, sourceFormat.Channels);
         _sampleRate = sourceFormat.SampleRate;
+        _bitsPerSample = sourceFormat.BitsPerSample;
         _bytesPerSample = sourceFormat.BitsPerSample / 8;
         _writer = new WaveFileWriter(path, new WaveFormat(_sampleRate, 16, 1));
+        _keepalive = new System.Threading.Timer(
+            _ => Keepalive(), null, HeaderInterval, HeaderInterval);
     }
 
     /// UTC time the first non-empty buffer arrived, or null if the device
@@ -77,6 +94,10 @@ internal sealed class TrackWriter : IDisposable
         {
             if (_stopped) return;
             _stopped = true;
+            // Dispose() here does not wait for a running callback, so a tick
+            // already blocked on _gate can't deadlock us — it just observes
+            // _stopped and returns once we're done.
+            _keepalive.Dispose();
             if (FirstBufferAt is not null) PadToWallClock();
             _writer.Flush();
             _writer.Dispose();
@@ -85,9 +106,35 @@ internal sealed class TrackWriter : IDisposable
 
     public void Dispose() => Stop();
 
+    /// Keep the file growing (and its header current) through stretches where
+    /// the device delivers no buffers at all. Without this the padding only
+    /// happens on the *next* buffer, so a process killed during a quiet
+    /// stretch would leave every one of those silent minutes missing rather
+    /// than merely unflushed.
+    private void Keepalive()
+    {
+        lock (_gate)
+        {
+            if (_stopped || FirstBufferAt is null) return;
+            PadToWallClock();
+            // Unconditionally, not MaybeWriteHeader(): this already runs at
+            // the header cadence, and timer jitter puts consecutive ticks a
+            // hair under the interval — enough for the gate to drop every
+            // other one and leave the header a full tick behind the data.
+            WriteHeader();
+        }
+    }
+
+    /// Rate-limit the header rewrite on the capture path, where buffers land
+    /// every ~10 ms and each rewrite costs a seek and a flush.
     private void MaybeWriteHeader()
     {
         if (_clock.Elapsed - _lastHeaderWrite < HeaderInterval) return;
+        WriteHeader();
+    }
+
+    private void WriteHeader()
+    {
         _lastHeaderWrite = _clock.Elapsed;
         _writer.Flush();
     }
@@ -142,9 +189,9 @@ internal sealed class TrackWriter : IDisposable
     }
 
     private float ReadSample(ReadOnlySpan<byte> sample) =>
-        _source.Encoding == WaveFormatEncoding.IeeeFloat
+        _sourceIsFloat
             ? BitConverter.ToSingle(sample)
-            : _source.BitsPerSample switch
+            : _bitsPerSample switch
             {
                 16 => BitConverter.ToInt16(sample) / 32768f,
                 24 => ((sample[2] << 24 | sample[1] << 16 | sample[0] << 8) >> 8) / 8388608f,
