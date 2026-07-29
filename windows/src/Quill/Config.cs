@@ -9,7 +9,7 @@ namespace Quill;
 ///
 ///     {
 ///       "recordings_dir": "~/Recordings",
-///       "transcription": { "enabled": true, "engine": "whisper", "model": "base.en" },
+///       "transcription": { "enabled": true, "engine": "whisper", "model": "small.en" },
 ///       "on_stop": "my-hook.cmd"
 ///     }
 ///
@@ -55,7 +55,7 @@ internal static class Config
     public static string TranscriptionEngine() => Load()?.Transcription?.Engine ?? "whisper";
 
     /// whisper.cpp model to run, e.g. "base.en", "small.en", "large-v3-turbo".
-    public static string TranscriptionModel() => Load()?.Transcription?.Model ?? "base.en";
+    public static string TranscriptionModel() => Load()?.Transcription?.Model ?? "small.en";
 
     /// Capture the default communications device instead of the default
     /// multimedia device for the mic track. Meeting apps often switch the

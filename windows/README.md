@@ -77,7 +77,7 @@ kill quill mid-silence and you keep everything up to the last second.
 
 ## Transcription
 
-Built in, on-device, automatic. The engine is **whisper.cpp** (`base.en` by
+Built in, on-device, automatic. The engine is **whisper.cpp** (`small.en` by
 default) through Whisper.net. The GGML model downloads once into
 `%LOCALAPPDATA%\quill\models` and is reused; `quill doctor` tells you whether
 it's already cached, so you're never downloading after an important meeting.
@@ -92,7 +92,8 @@ on next launch (the filesystem is the queue: a session with `meta.json` but no
 Swap models in the config: `tiny.en`, `base.en`, `small.en`, `medium.en`,
 `large-v3-turbo`, or the multilingual variants without the `.en` suffix
 (language is auto-detected for those). Bigger models are slower and more
-accurate; `base.en` transcribes far faster than real time on any modern CPU.
+accurate. `small.en` is the default for stronger recognition on challenging
+audio; choose `base.en` when transcription speed matters more.
 
 ## Config
 
@@ -102,7 +103,7 @@ also honored, for people sharing a dotfiles repo with a Mac):
 ```json
 {
   "recordings_dir": "~/Recordings",
-  "transcription": { "enabled": true, "engine": "whisper", "model": "base.en" },
+  "transcription": { "enabled": true, "engine": "whisper", "model": "small.en" },
   "mic_use_communications_device": false,
   "on_stop": "my-hook.cmd"
 }
