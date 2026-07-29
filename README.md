@@ -8,6 +8,10 @@ Nothing ever leaves the machine.
 Named for the feather. Sibling of [parrot](https://github.com/digimata/parrot), same skeleton: single
 Swift binary, menu-bar tray, no app bundle.
 
+A Windows port lives in [`windows/`](windows/README.md) — same session layout
+and config, WASAPI loopback instead of Core Audio taps, whisper.cpp instead of
+Parakeet.
+
 ## Install
 
 ```sh
