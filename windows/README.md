@@ -13,7 +13,7 @@ identical session layout on disk — with the platform pieces swapped:
 |---|---|---|
 | system audio | Core Audio process tap | WASAPI loopback (no virtual cable, no driver) |
 | mic | AVAudioEngine | WASAPI shared-mode capture |
-| container | CAF | WAV (header rewritten on every flush, so a killed process still leaves a playable file) |
+| container | CAF | WAV (header rewritten once a second, so a killed process still leaves a playable file) |
 | transcription | Parakeet via FluidAudio | whisper.cpp via [Whisper.net](https://github.com/sandrohanea/whisper.net) |
 | UI | NSStatusItem | NotifyIcon |
 | launch at login | LaunchAgent | HKCU `...\CurrentVersion\Run` |

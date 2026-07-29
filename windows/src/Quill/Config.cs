@@ -82,24 +82,51 @@ internal static class Config
         return System.IO.Path.GetFullPath(expanded);
     }
 
-    /// Parse the config file. A malformed config is reported on stderr rather
-    /// than silently ignored — recordings landing in an unexpected place is
-    /// worse than a warning.
+    /// Parse the config file, caching until it changes on disk. Every accessor
+    /// above goes through here, and the daemon reads config on each recording
+    /// stop — re-parsing per property would be a syscall storm for nothing,
+    /// while caching forever would mean restarting quill after every edit.
+    ///
+    /// A malformed config is reported on stderr rather than silently ignored:
+    /// recordings landing in an unexpected place is worse than a warning.
     private static ConfigFile? Load()
     {
         var path = File.Exists(Path) ? Path : File.Exists(LegacyPath) ? LegacyPath : null;
         if (path is null) return null;
-        try
+
+        lock (CacheGate)
         {
-            using var stream = File.OpenRead(path);
-            return JsonSerializer.Deserialize<ConfigFile>(stream, Options);
-        }
-        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"warning: {path} is not valid JSON — ignoring config");
-            return null;
+            DateTime stamp;
+            try
+            {
+                stamp = File.GetLastWriteTimeUtc(path);
+            }
+            catch (IOException)
+            {
+                return _cached;
+            }
+            if (_cachedPath == path && _cachedStamp == stamp) return _cached;
+
+            _cachedPath = path;
+            _cachedStamp = stamp;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                _cached = JsonSerializer.Deserialize<ConfigFile>(stream, Options);
+            }
+            catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"warning: {path} is not valid JSON — ignoring config");
+                _cached = null;
+            }
+            return _cached;
         }
     }
+
+    private static readonly object CacheGate = new();
+    private static ConfigFile? _cached;
+    private static string? _cachedPath;
+    private static DateTime _cachedStamp;
 
     private static readonly JsonSerializerOptions Options = new()
     {

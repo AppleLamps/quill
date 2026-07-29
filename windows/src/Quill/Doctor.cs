@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Win32;
 using NAudio.CoreAudioApi;
 using Quill.Transcription;
@@ -11,7 +12,9 @@ internal abstract record CheckStatus
     public sealed record Fail(string Message) : CheckStatus;
 }
 
-internal sealed record Check(string Name, CheckStatus Status, string? Remediation = null);
+/// `Detail` is the line printed under a check: what to do about a warning or
+/// failure, or which device/path an ok check resolved to.
+internal sealed record Check(string Name, CheckStatus Status, string? Detail = null);
 
 internal static class DoctorReport
 {
@@ -123,8 +126,11 @@ internal static class DoctorReport
         return value.Equals("Allow", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static void Print(IReadOnlyList<Check> checks)
+    public static void Print(IReadOnlyList<Check> checks) => Console.Write(Format(checks));
+
+    public static string Format(IReadOnlyList<Check> checks)
     {
+        var report = new StringBuilder();
         foreach (var check in checks)
         {
             var (mark, label) = check.Status switch
@@ -134,9 +140,10 @@ internal static class DoctorReport
                 CheckStatus.Fail f => ("x", f.Message),
                 _ => ("?", "unknown"),
             };
-            Console.WriteLine($"{mark} {check.Name}: {label}");
-            if (check.Remediation is { } r) Console.WriteLine($"    -> {r}");
+            report.AppendLine($"{mark} {check.Name}: {label}");
+            if (check.Detail is { } detail) report.AppendLine($"    {detail}");
         }
+        return report.ToString();
     }
 
     /// True if no checks are in a hard-fail state. Warnings don't block.

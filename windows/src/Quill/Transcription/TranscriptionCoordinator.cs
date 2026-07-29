@@ -202,9 +202,12 @@ internal sealed class TranscriptionCoordinator
         if (cmd is null) return;
         try
         {
+            // /s /c "..." is the one cmd.exe form that survives a quoted
+            // program path inside the command string; plain /c strips the
+            // outer quotes and breaks on `"C:\My Tools\hook.cmd"`.
             Process.Start(new ProcessStartInfo("cmd.exe")
             {
-                Arguments = $"/c {cmd} \"{dir}\"",
+                Arguments = $"/s /c \"{cmd} \"{dir}\"\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
             });
@@ -222,7 +225,7 @@ internal sealed class TranscriptionCoordinator
         {
             File.AppendAllText(Path.Combine(dir, "transcribe.log"), line);
         }
-        catch (IOException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // A log we can't write is not worth failing a transcript over.
         }
@@ -251,9 +254,14 @@ internal sealed class TranscriptionCoordinator
             var tracks = new List<Track>();
             foreach (var (key, speaker) in new[] { ("mic", "me"), ("system", "them") })
             {
-                if (!files.TryGetProperty(key, out var file) || file.GetString() is not { } name) continue;
+                // Tracks always live in the session folder; take the file name
+                // only, so a hand-edited meta.json can't point somewhere else.
+                if (!files.TryGetProperty(key, out var file)
+                    || Path.GetFileName(file.GetString()) is not { Length: > 0 } name) continue;
                 var offset = offsets.ValueKind == JsonValueKind.Object
-                             && offsets.TryGetProperty(key, out var o) ? o.GetInt32() : 0;
+                             && offsets.TryGetProperty(key, out var o)
+                             && o.ValueKind == JsonValueKind.Number
+                             && o.TryGetInt32(out var ms) ? ms : 0;
                 tracks.Add(new Track(name, speaker, offset));
             }
             return new SessionMeta(tracks);

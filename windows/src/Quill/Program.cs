@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Quill;
@@ -33,16 +34,28 @@ internal static class Program
 
     private const int SwHide = 0;
 
+    private static readonly string[] Commands = ["run", "doctor", "transcribe", "install"];
+
     [STAThread]
     private static int Main(string[] args)
     {
-        Console.OutputEncoding = System.Text.Encoding.UTF8;
-        var command = args.FirstOrDefault(a => !a.StartsWith('-')) ?? "run";
+        TryUseUtf8Console();
 
         if (args.Contains("-h") || args.Contains("--help"))
         {
             Console.WriteLine(Usage);
             return 0;
+        }
+
+        // The subcommand is the first argument or nothing at all: scanning for
+        // the first non-flag argument instead would read the value of a
+        // leading option as the command (`quill --out D:\Meetings` → "D:\Meetings").
+        var command = args.Length > 0 && !args[0].StartsWith('-') ? args[0] : "run";
+        if (!Commands.Contains(command))
+        {
+            Console.Error.WriteLine($"unknown command \"{command}\"\n");
+            Console.Error.WriteLine(Usage);
+            return 64;
         }
 
         switch (command)
@@ -62,15 +75,27 @@ internal static class Program
                     launchAtLogin: args.Contains("--launch-at-login"),
                     uninstall: args.Contains("--uninstall"));
             default:
-                Console.Error.WriteLine($"unknown command \"{command}\"\n");
-                Console.Error.WriteLine(Usage);
-                return 64;
+                throw new UnreachableException(command);
+        }
+    }
+
+    /// Box-drawing and · separators in the output assume UTF-8. Setting the
+    /// encoding throws when quill runs with no console attached at all, which
+    /// is not a reason to fail to record.
+    private static void TryUseUtf8Console()
+    {
+        try
+        {
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+        }
+        catch (IOException)
+        {
         }
     }
 
     private static int Transcribe(string[] args)
     {
-        var dir = args.SkipWhile(a => a != "transcribe").Skip(1).FirstOrDefault(a => !a.StartsWith('-'));
+        var dir = args.Skip(1).FirstOrDefault(a => !a.StartsWith('-'));
         if (dir is null)
         {
             Console.Error.WriteLine("usage: quill transcribe <session-dir>");
@@ -106,6 +131,9 @@ internal static class Program
         {
             Console.Error.WriteLine("startup checks failed:");
             DoctorReport.Print(checks);
+            // A login launch has no console to read: leave the reason on disk
+            // instead of just vanishing.
+            if (args.Contains("--background")) LogStartupFailure(DoctorReport.Format(checks));
             return 1;
         }
 
@@ -133,6 +161,21 @@ internal static class Program
         Console.Error.WriteLine($"quill up · recordings → {root} · ^C to quit");
         Application.Run();
         return 0;
+    }
+
+    private static void LogStartupFailure(string report)
+    {
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "quill");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "startup.log"),
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} startup checks failed{Environment.NewLine}{report}");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     /// Value of `--name <value>`, or null when absent.

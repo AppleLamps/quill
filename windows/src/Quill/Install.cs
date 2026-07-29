@@ -1,3 +1,4 @@
+using System.Security;
 using Microsoft.Win32;
 
 namespace Quill;
@@ -30,11 +31,27 @@ internal static class Install
             Console.Error.WriteLine("couldn't locate the quill executable");
             return 1;
         }
+        // Under `dotnet run` the host, not quill, is the process — registering
+        // that would put a bare `dotnet.exe run --background` in the Run key.
+        if (!Path.GetFileNameWithoutExtension(exe).Equals("quill", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine(
+                $"refusing to register {exe} — run install from the published quill.exe");
+            return 1;
+        }
 
         // --background so the login launch doesn't flash a console window.
         var command = $"\"{exe}\" run --background";
-        using var key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true);
-        key.SetValue(ValueName, command, RegistryValueKind.String);
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true);
+            key.SetValue(ValueName, command, RegistryValueKind.String);
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or SecurityException)
+        {
+            Console.Error.WriteLine($"couldn't write HKCU\\{RunKey}: {e.Message}");
+            return 1;
+        }
 
         Console.WriteLine("+ launch-at-login installed");
         Console.WriteLine($"  key:     HKCU\\{RunKey}\\{ValueName}");
@@ -44,13 +61,21 @@ internal static class Install
 
     private static int RemoveEntry()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-        if (key?.GetValue(ValueName) is null)
+        try
         {
-            Console.WriteLine($"nothing to remove (no {ValueName} entry under HKCU\\{RunKey})");
-            return 0;
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
+            if (key?.GetValue(ValueName) is null)
+            {
+                Console.WriteLine($"nothing to remove (no {ValueName} entry under HKCU\\{RunKey})");
+                return 0;
+            }
+            key.DeleteValue(ValueName);
         }
-        key.DeleteValue(ValueName);
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or SecurityException)
+        {
+            Console.Error.WriteLine($"couldn't edit HKCU\\{RunKey}: {e.Message}");
+            return 1;
+        }
         Console.WriteLine("+ launch-at-login removed");
         return 0;
     }

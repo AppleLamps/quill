@@ -6,10 +6,11 @@ namespace Quill.UI;
 internal sealed class TrayController : IDisposable
 {
     private readonly NotifyIcon _icon;
+    private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _toggle;
     private readonly ToolStripMenuItem _status;
     private readonly ToolStripSeparator _statusSeparator;
-    private Icon? _current;
+    private readonly Dictionary<bool, Icon> _icons = [];
 
     public Action? OnToggle { get; set; }
     public Action? OnOpenFolder { get; set; }
@@ -21,8 +22,8 @@ internal sealed class TrayController : IDisposable
         _status = new ToolStripMenuItem("") { Enabled = false, Visible = false };
         _statusSeparator = new ToolStripSeparator { Visible = false };
 
-        var menu = new ContextMenuStrip();
-        menu.Items.AddRange(new ToolStripItem[]
+        _menu = new ContextMenuStrip();
+        _menu.Items.AddRange(new ToolStripItem[]
         {
             _toggle,
             _status,
@@ -34,7 +35,7 @@ internal sealed class TrayController : IDisposable
 
         _icon = new NotifyIcon
         {
-            ContextMenuStrip = menu,
+            ContextMenuStrip = _menu,
             Visible = true,
             Text = "quill",
         };
@@ -65,18 +66,25 @@ internal sealed class TrayController : IDisposable
         _statusSeparator.Visible = line is not null;
     }
 
+    /// Both feathers are drawn once and kept. Update() runs every second
+    /// while recording, and regenerating a GDI icon per tick is how a tray
+    /// app quietly eats handles.
     private void SetIcon(bool recording)
     {
-        var next = TrayIconFactory.Feather(recording);
-        _icon.Icon = next;
-        _current?.Dispose();
-        _current = next;
+        if (!_icons.TryGetValue(recording, out var icon))
+        {
+            icon = TrayIconFactory.Feather(recording);
+            _icons[recording] = icon;
+        }
+        if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
     }
 
     public void Dispose()
     {
         _icon.Visible = false;
         _icon.Dispose();
-        _current?.Dispose();
+        _menu.Dispose();
+        foreach (var icon in _icons.Values) icon.Dispose();
+        _icons.Clear();
     }
 }

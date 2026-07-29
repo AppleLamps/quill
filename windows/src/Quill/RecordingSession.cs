@@ -45,11 +45,13 @@ internal sealed class RecordingSession
         }
     }
 
-    /// Stop both tracks and write meta.json.
+    /// Stop both tracks and write meta.json. A device that fails to shut down
+    /// cleanly must not cost us the other track or the metadata — without
+    /// meta.json the session is invisible to the transcription queue.
     public void Stop()
     {
-        _mic.Stop();
-        _system.Stop();
+        StopTrack("mic", _mic.Stop);
+        StopTrack("system audio", _system.Stop);
 
         var ended = DateTime.UtcNow;
         // The tracks don't start on the same buffer; record how far each lags
@@ -73,6 +75,18 @@ internal sealed class RecordingSession
 
         var json = meta.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(Path.Combine(Dir, "meta.json"), json);
+    }
+
+    private static void StopTrack(string label, Action stop)
+    {
+        try
+        {
+            stop();
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"{label} track didn't stop cleanly: {e.Message}");
+        }
     }
 
     private static string Iso(DateTime utc) =>

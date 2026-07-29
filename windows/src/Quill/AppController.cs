@@ -68,10 +68,20 @@ internal sealed class AppController : IDisposable
     private void StopSession()
     {
         if (_session is not { } session) return;
-        session.Stop();
+        // Clear the state first: if finalizing throws, the tray must not stay
+        // stuck red on a session that is no longer capturing.
         _session = null;
         _ticker.Stop();
         _tray.Update(recording: false, elapsed: null);
+        try
+        {
+            session.Stop();
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"recording stop failed: {e.Message}");
+            Notify.User("quill — recording stop failed", e.Message);
+        }
         Console.Error.WriteLine(
             $"○ stopped · {Format(DateTime.UtcNow - session.StartedAt)} · {session.Dir}");
 

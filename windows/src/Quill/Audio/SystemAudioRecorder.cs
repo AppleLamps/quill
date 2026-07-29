@@ -7,50 +7,16 @@ namespace Quill.Audio;
 /// WASAPI loopback client on the default render device. No virtual cable, no
 /// driver install, no elevation — the same "just works" property the macOS
 /// build gets from Core Audio process taps.
-internal sealed class SystemAudioRecorder
+internal sealed class SystemAudioRecorder : CaptureTrack
 {
-    private WasapiLoopbackCapture? _capture;
-    private TrackWriter? _writer;
+    protected override string Label => "system audio";
 
-    public DateTime? FirstBufferAt => _writer?.FirstBufferAt;
-
-    public void Start(string path)
+    protected override MMDevice ResolveDevice(MMDeviceEnumerator devices)
     {
-        using var devices = new MMDeviceEnumerator();
         if (!devices.HasDefaultAudioEndpoint(DataFlow.Render, Role.Console))
             throw new InvalidOperationException("no default output device — loopback capture needs one");
-
-        var device = devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
-        var capture = new WasapiLoopbackCapture(device);
-        var writer = new TrackWriter(path, capture.WaveFormat);
-
-        capture.DataAvailable += (_, e) => writer.Write(e.Buffer, e.BytesRecorded);
-        capture.RecordingStopped += (_, e) =>
-        {
-            if (e.Exception is not null)
-                Console.Error.WriteLine($"system audio capture stopped: {e.Exception.Message}");
-        };
-
-        try
-        {
-            capture.StartRecording();
-        }
-        catch
-        {
-            writer.Stop();
-            capture.Dispose();
-            throw;
-        }
-
-        _capture = capture;
-        _writer = writer;
+        return devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
     }
 
-    public void Stop()
-    {
-        _capture?.StopRecording();
-        _capture?.Dispose();
-        _capture = null;
-        _writer?.Stop();
-    }
+    protected override IWaveIn CreateCapture(MMDevice device) => new WasapiLoopbackCapture(device);
 }
